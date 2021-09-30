@@ -315,6 +315,7 @@ def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
 
         if num_of_faces_out:
             out =  tf.cast(valid_count,tf.float32)
+            #out = valid_count # for integer output
 
         else:
             out = tf.gather(decode_preds, selected_indices)
