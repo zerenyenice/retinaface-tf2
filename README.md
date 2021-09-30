@@ -1,3 +1,6 @@
+Retinaface-tf2 repo was forked and necessary changes has been made for running model on tensorflow version >= 2.3 and converting model to tflite with latest layers supported. 
+This repo is only for exporting, saving weights or tflite convertion of retinaface model to inference on new versions of tensorflow. Training part of the code hasn't been tested.
+
 # [retinaface-tf2](https://github.com/peteryuX/retinaface-tf2)
 
 [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/peteryuX/retinaface-tf2.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/peteryuX/retinaface-tf2/context:python)
