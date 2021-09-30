@@ -260,16 +260,16 @@ class ClassHead(tf.keras.layers.Layer):
 
 
 def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
-                    name='RetinaFaceModel', num_of_faces_out=False):
+                    name='RetinaFaceModel', num_of_faces_out=False, input_size=(None,None,3)):
     """Retina Face Model"""
-    input_size = cfg['input_size'] if training else None
+    input_size = (cfg['input_size'],cfg['input_size'],3) if training else input_size
     wd = cfg['weights_decay']
     out_ch = cfg['out_channel']
     num_anchor = len(cfg['min_sizes'][0])
     backbone_type = cfg['backbone_type']
 
     # define model
-    x = inputs = Input([input_size, input_size, 3], name='input_image')
+    x = inputs = Input(input_size, name='input_image')
     #x = inputs = Input([480, 288, 3], name='input_image')
 
     x = Backbone(backbone_type=backbone_type)(x)
@@ -320,6 +320,6 @@ def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
         else:
             out = tf.gather(decode_preds, selected_indices)
             # if it gives padded wrong results at the mobile side change out following and slice first valid_count elements of the output
-            #out = [out,valid_count]
+            out = [out,tf.cast(valid_count,tf.float32)]
 
     return Model(inputs, out, name=name)
