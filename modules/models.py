@@ -3,7 +3,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.applications import MobileNetV2, ResNet50
 from tensorflow.keras.layers import Input, Conv2D, ReLU, LeakyReLU
 from modules.anchor import decode_tf, prior_box_tf
-
+from tensorflow.python.ops.gen_image_ops import non_max_suppression_v4
 
 def _regularizer(weights_decay):
     """l2 regularizer"""
@@ -50,9 +50,14 @@ def Backbone(backbone_type='ResNet50', use_pretrain=True):
         elif backbone_type == 'MobileNetV2':
             extractor = MobileNetV2(
                 input_shape=x.shape[1:], include_top=False, weights=weights)
-            pick_layer1 = 54  # [80, 80, 32]
-            pick_layer2 = 116  # [40, 40, 96]
-            pick_layer3 = 143  # [20, 20, 160]
+            if tf.__version__ == '2.6.0':
+                pick_layer1 = 53  # [80, 80, 32]
+                pick_layer2 = 115  # [40, 40, 96]
+                pick_layer3 = 142  # [20, 20, 160]
+            else:
+                pick_layer1 = 54  # [80, 80, 32]
+                pick_layer2 = 116  # [40, 40, 96]
+                pick_layer3 = 143  # [20, 20, 160]
             preprocess = tf.keras.applications.mobilenet_v2.preprocess_input
         else:
             raise NotImplementedError(
@@ -90,6 +95,14 @@ class ConvUnit(tf.keras.layers.Layer):
     def call(self, x):
         return self.act_fn(self.bn(self.conv(x)))
 
+    def get_config(self):
+        config = {'conv': self.conv,
+                  'bn': self.bn,
+                  'act_fn': self.act_fn}
+        base_config = super(ConvUnit, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 class FPN(tf.keras.layers.Layer):
     """Feature Pyramid Network"""
@@ -99,11 +112,11 @@ class FPN(tf.keras.layers.Layer):
         if (out_ch <= 64):
             act = 'lrelu'
 
-        self.output1 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act)
-        self.output2 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act)
-        self.output3 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act)
-        self.merge1 = ConvUnit(f=out_ch, k=3, s=1, wd=wd, act=act)
-        self.merge2 = ConvUnit(f=out_ch, k=3, s=1, wd=wd, act=act)
+        self.output1 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act,name='ConvBN1')
+        self.output2 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act,name='ConvBN2')
+        self.output3 = ConvUnit(f=out_ch, k=1, s=1, wd=wd, act=act,name='ConvBN3')
+        self.merge1 = ConvUnit(f=out_ch, k=3, s=1, wd=wd, act=act,name='ConvBN4')
+        self.merge2 = ConvUnit(f=out_ch, k=3, s=1, wd=wd, act=act,name='ConvBN5')
 
     def call(self, x):
         output1 = self.output1(x[0])  # [80, 80, out_ch]
@@ -122,6 +135,17 @@ class FPN(tf.keras.layers.Layer):
 
         return output1, output2, output3
 
+    def get_config(self):
+        config = {'output1': self.output1,
+                  'output2': self.output2,
+                  'output3': self.output3,
+                  'merge1': self.merge1,
+                  'merge2': self.merge2
+                  }
+        base_config = super(FPN, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 class SSH(tf.keras.layers.Layer):
     """Single Stage Headless Layer"""
@@ -132,13 +156,13 @@ class SSH(tf.keras.layers.Layer):
         if (out_ch <= 64):
             act = 'lrelu'
 
-        self.conv_3x3 = ConvUnit(f=out_ch // 2, k=3, s=1, wd=wd, act=None)
+        self.conv_3x3 = ConvUnit(f=out_ch // 2, k=3, s=1, wd=wd, act=None,name=name+'_1')
 
-        self.conv_5x5_1 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=act)
-        self.conv_5x5_2 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=None)
+        self.conv_5x5_1 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=act,name=name+'_2')
+        self.conv_5x5_2 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=None,name=name+'_3')
 
-        self.conv_7x7_2 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=act)
-        self.conv_7x7_3 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=None)
+        self.conv_7x7_2 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=act,name=name+'_4')
+        self.conv_7x7_3 = ConvUnit(f=out_ch // 4, k=3, s=1, wd=wd, act=None,name=name+'_5')
 
         self.relu = ReLU()
 
@@ -156,6 +180,18 @@ class SSH(tf.keras.layers.Layer):
 
         return output
 
+    def get_config(self):
+        config = {'conv_3x3': self.conv_3x3,
+                  'conv_5x5_1': self.conv_5x5_1,
+                  'conv_5x5_2': self.conv_5x5_2,
+                  'conv_7x7_2': self.conv_7x7_2,
+                  'conv_7x7_3': self.conv_7x7_3,
+                  'relu': self.relu
+                  }
+        base_config = super(SSH, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 class BboxHead(tf.keras.layers.Layer):
     """Bbox Head Layer"""
@@ -169,6 +205,14 @@ class BboxHead(tf.keras.layers.Layer):
         x = self.conv(x)
 
         return tf.reshape(x, [-1, h * w * self.num_anchor, 4])
+
+    def get_config(self):
+        config = {'num_anchor': self.num_anchor,
+                  'conv': self.conv,
+                  }
+        base_config = super(BboxHead, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
 
 
 class LandmarkHead(tf.keras.layers.Layer):
@@ -184,6 +228,14 @@ class LandmarkHead(tf.keras.layers.Layer):
 
         return tf.reshape(x, [-1, h * w * self.num_anchor, 10])
 
+    def get_config(self):
+        config = {'num_anchor': self.num_anchor,
+                  'conv': self.conv,
+                  }
+        base_config = super(LandmarkHead, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 class ClassHead(tf.keras.layers.Layer):
     """Class Head Layer"""
@@ -198,9 +250,17 @@ class ClassHead(tf.keras.layers.Layer):
 
         return tf.reshape(x, [-1, h * w * self.num_anchor, 2])
 
+    def get_config(self):
+        config = {'num_anchor': self.num_anchor,
+                  'conv': self.conv,
+                  }
+        base_config = super(ClassHead, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
-                    name='RetinaFaceModel'):
+                    name='RetinaFaceModel', num_of_faces_out=False):
     """Retina Face Model"""
     input_size = cfg['input_size'] if training else None
     wd = cfg['weights_decay']
@@ -210,6 +270,7 @@ def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
 
     # define model
     x = inputs = Input([input_size, input_size, 3], name='input_image')
+    #x = inputs = Input([480, 288, 3], name='input_image')
 
     x = Backbone(backbone_type=backbone_type)(x)
 
@@ -242,13 +303,22 @@ def RetinaFaceModel(cfg, training=False, iou_th=0.4, score_th=0.02,
                               cfg['min_sizes'],  cfg['steps'], cfg['clip'])
         decode_preds = decode_tf(preds, priors, cfg['variances'])
 
-        selected_indices = tf.image.non_max_suppression(
+
+        selected_indices, valid_count = tf.image.non_max_suppression_padded(
             boxes=decode_preds[:, :4],
             scores=decode_preds[:, -1],
             max_output_size=tf.shape(decode_preds)[0],
             iou_threshold=iou_th,
-            score_threshold=score_th)
+            score_threshold=score_th,
+            pad_to_max_output_size=False
+        )
 
-        out = tf.gather(decode_preds, selected_indices)
+        if num_of_faces_out:
+            out =  tf.cast(valid_count,tf.float32)
+
+        else:
+            out = tf.gather(decode_preds, selected_indices)
+            # if it gives padded wrong results at the mobile side change out following and slice first valid_count elements of the output
+            #out = [out,valid_count]
 
     return Model(inputs, out, name=name)
